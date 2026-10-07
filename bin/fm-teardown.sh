@@ -1803,6 +1803,7 @@ cleanup_stale_lock_for_safety_check() {
   fi
 
   if fm_lock_is_provably_stale "$lock" "$dir" "$STALE_WORKTREE_LOCK_AGE_SECS"; then
+    teardown_treehouse_return_identity "$dir" "$PROJ" "$TREEHOUSE_RETURN_META" "$ID" "$FM_HOME" || return 1
     rm -f "$lock"
     echo "teardown: removed provably-stale git lock $lock (age >= ${STALE_WORKTREE_LOCK_AGE_SECS}s, no live holder) and retrying worktree safety checks" >&2
     return 0
@@ -1893,6 +1894,7 @@ teardown_treehouse_return() {
           return 1
         fi
       fi
+      teardown_treehouse_return_identity "$dir" "$cd_dir" "$record_meta" "$record_id" "$record_home" || return 1
       if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
         [ -n "$out" ] && printf '%s\n' "$out"
         echo "teardown: $label return succeeded after stale-lock cleanup" >&2

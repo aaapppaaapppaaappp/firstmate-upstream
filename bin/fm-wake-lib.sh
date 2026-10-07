@@ -1727,6 +1727,7 @@ fm_treehouse_slot_owner_claim() {  # <worktree> <task-id> <home> [spawn-gen]
 # custody rules, and bin/fm-spawn.sh's header owns relaunch requirements.
 fm_treehouse_slot_owner_state() {  # <worktree> <task-id>
   local worktree=$1 id=$2 marker line owner_id='' owner_home='' owner_gen='' task_count=0 home_count=0 gen_count=0
+  local LC_ALL=C
   FM_TREEHOUSE_SLOT_OWNER=unsafe
   FM_TREEHOUSE_SLOT_OWNER_ID=
   FM_TREEHOUSE_SLOT_OWNER_HOME=
@@ -1745,7 +1746,8 @@ fm_treehouse_slot_owner_state() {  # <worktree> <task-id>
       *) return 0 ;;
     esac
   done < "$marker" || return 0
-  [ -n "$owner_id" ] && [ "$task_count" -eq 1 ] && [ "$home_count" -le 1 ] && [ "$gen_count" -le 1 ] || return 0
+  [ "$task_count" -eq 1 ] && [ "$home_count" -eq 1 ] && [ -n "$owner_home" ] && [ "$gen_count" -le 1 ] || return 0
+  case "$owner_id" in ''|.*|*[!A-Za-z0-9._-]*) return 0 ;; esac
   if [ "$gen_count" -eq 1 ]; then
     case "$owner_gen" in ''|.*|*[!A-Za-z0-9._-]*) return 0 ;; esac
   fi

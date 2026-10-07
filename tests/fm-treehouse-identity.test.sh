@@ -254,6 +254,23 @@ test_exact_registered_path_retains_legacy_success() {
   pass 'existing exact registered path success remains without a new claim'
 }
 
+test_exact_registered_path_refuses_malformed_legacy_claims() {
+  local dir variant
+  for variant in empty-home missing-home invalid-task; do
+    dir=$(make_case "exact-claim-$variant" legacy)
+    sed 's@pool-store/1/project@pool-link/1/project@' "$dir/home/state/identity-task.meta" > "$dir/meta"
+    mv "$dir/meta" "$dir/home/state/identity-task.meta"
+    case "$variant" in
+      empty-home) printf 'task=identity-task\nhome=\n' > "$dir/pool-store/1/.fm-slot-owner" ;;
+      missing-home) printf 'task=identity-task\n' > "$dir/pool-store/1/.fm-slot-owner" ;;
+      invalid-task) printf 'task=successor/invalid\nhome=%s\n' "$dir/home" > "$dir/pool-store/1/.fm-slot-owner" ;;
+    esac
+    assert_refused_before_slot_effects "$dir" "$variant"
+    assert_grep 'claim that cannot be read' "$dir/stderr" "$variant: malformed claim was not reported"
+  done
+  pass 'exact registered paths refuse empty or missing homes and invalid task tokens in legacy claims'
+}
+
 test_symlink_record_requires_claim_for_physical_registration() {
   local dir
   dir=$(make_case symlink-record legacy)
@@ -453,6 +470,127 @@ SH
   pass 'legacy return retries refuse changed generations and registrations before another allocator invocation'
 }
 
+test_stale_lock_final_retry_rechecks_original_record_custody() {
+  local dir variant lock rc real_git
+  real_git=$(command -v git)
+  for variant in unchanged lost-custody; do
+    dir=$(make_case "final-retry-$variant" legacy)
+    lock="$(git -C "$dir/pool-store/1/project" rev-parse --absolute-git-dir)/index.lock"
+    cat > "$dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${3:-}" = "$FM_IDENTITY_CASE/pool-link/1/project" ] || exit 90
+printf '%s\n' "$*" >> "$FM_IDENTITY_CASE/treehouse.log"
+if [ "$(wc -l < "$FM_IDENTITY_CASE/treehouse.log")" -eq 1 ]; then
+  : > "$FM_IDENTITY_LOCK"
+  echo "fatal: Unable to create '$FM_IDENTITY_LOCK': File exists" >&2
+  exit 1
+fi
+SH
+    cat > "$dir/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "${1:-}" = -C ] && [ "${3:-}" = status ] && [ "${4:-}" = --porcelain ] \
+  && [ -f "$FM_IDENTITY_CASE/treehouse.log" ] && [ ! -e "$FM_IDENTITY_LOCK" ]; then
+  touch "$FM_IDENTITY_CASE/safety-callback"
+  if [ "$FM_IDENTITY_CHANGE" = lost-custody ]; then
+    rm "$FM_IDENTITY_CASE/pool-store/1/.fm-slot-owner"
+  fi
+fi
+exec "$FM_IDENTITY_REAL_GIT" "$@"
+SH
+    cat > "$dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" -d cwd "*) exit 0 ;;
+esac
+exit 1
+SH
+    chmod +x "$dir/fakebin/"*
+    rc=0
+    FM_IDENTITY_REAL_GIT="$real_git" FM_IDENTITY_LOCK="$lock" FM_IDENTITY_CHANGE="$variant" \
+      FM_TREEHOUSE_RETURN_LOCK_RETRIES=0 FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS=0 \
+      FM_STALE_WORKTREE_LOCK_AGE_SECS=0 run_case "$dir" || rc=$?
+    assert_absent "$lock" 'final retry fixture did not remove the stale lock'
+    assert_present "$dir/safety-callback" 'final retry fixture did not reach the safety callback'
+    if [ "$variant" = lost-custody ]; then
+      [ "$rc" -ne 0 ] || fail 'final retry accepted custody lost during the safety callback'
+      assert_equals 1 "$(wc -l < "$dir/treehouse.log" | tr -d ' ')" 'lost custody reached the final allocator retry'
+      assert_present "$dir/home/state/identity-task.meta" 'final retry custody refusal removed the task record'
+      assert_grep 'custody claim' "$dir/stderr" 'final retry did not explain the custody refusal'
+    else
+      [ "$rc" -eq 0 ] || fail "unchanged final retry failed: $(cat "$dir/stderr")"
+      assert_equals 2 "$(wc -l < "$dir/treehouse.log" | tr -d ' ')" 'unchanged custody did not reach the final allocator retry'
+      assert_absent "$dir/home/state/identity-task.meta" 'successful final retry retained the task record'
+    fi
+  done
+  pass 'final allocator retry rechecks original-record custody after the safety callback and allows unchanged custody'
+}
+
+test_safety_recovery_rechecks_lease_before_stale_lock_removal() {
+  local dir variant lock rc real_git
+  real_git=$(command -v git)
+  for variant in unchanged new-lease; do
+    dir=$(make_case "safety-recovery-$variant" legacy)
+    lock="$(git -C "$dir/pool-store/1/project" rev-parse --absolute-git-dir)/index.lock"
+    printf 'lock sentinel\n' > "$lock"
+    cp "$lock" "$dir/lock-before"
+    cp "$dir/home/state/identity-task.meta" "$dir/meta-before"
+    cp "$dir/pool-store/1/.fm-slot-owner" "$dir/claim-before"
+    cat > "$dir/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "${1:-}" = -C ] && [ "${3:-}" = status ] && [ "${4:-}" = --porcelain ] \
+  && [ -e "$FM_IDENTITY_LOCK" ]; then
+  touch "$FM_IDENTITY_CASE/safety-blocked"
+  exit 128
+fi
+exec "$FM_IDENTITY_REAL_GIT" "$@"
+SH
+    cat > "$dir/fakebin/sleep" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ -f "$FM_IDENTITY_CASE/safety-blocked" ]; then
+  touch "$FM_IDENTITY_CASE/safety-waited"
+  if [ "$FM_IDENTITY_CHANGE" = new-lease ]; then
+    jq '.worktrees[0] += {leased:true,lease_holder:"secondmate"}' "$FM_IDENTITY_CASE/pool-store/treehouse-state.json" > "$FM_IDENTITY_CASE/new-state"
+    mv "$FM_IDENTITY_CASE/new-state" "$FM_IDENTITY_CASE/pool-store/treehouse-state.json"
+  fi
+fi
+SH
+    cat > "$dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" -d cwd "*) exit 0 ;;
+esac
+exit 1
+SH
+    chmod +x "$dir/fakebin/"*
+    rc=0
+    FM_IDENTITY_REAL_GIT="$real_git" FM_IDENTITY_LOCK="$lock" FM_IDENTITY_CHANGE="$variant" \
+      FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS=0 FM_STALE_WORKTREE_LOCK_AGE_SECS=0 \
+      run_case "$dir" || rc=$?
+    assert_present "$dir/safety-waited" 'safety recovery fixture did not enter its lock wait'
+    if [ "$variant" = new-lease ]; then
+      [ "$rc" -ne 0 ] || fail 'safety recovery accepted a lease created during its wait'
+      cmp -s "$dir/lock-before" "$lock" || fail 'safety recovery removed or changed the newly leased slot lock'
+      cmp -s "$dir/meta-before" "$dir/home/state/identity-task.meta" || fail 'safety recovery lease refusal changed the task record'
+      cmp -s "$dir/claim-before" "$dir/pool-store/1/.fm-slot-owner" || fail 'safety recovery lease refusal changed custody'
+      assert_present "$dir/pool-store/1/project/.claude/settings.local.json" 'safety recovery lease refusal removed the hook'
+      assert_absent "$dir/treehouse.log" 'safety recovery lease refusal invoked the allocator'
+      assert_absent "$dir/no-mistakes.log" 'safety recovery lease refusal killed an endpoint'
+      assert_equals true "$(jq -r '.worktrees[0].leased' "$dir/pool-store/treehouse-state.json")" 'safety recovery cleared the new lease'
+      assert_grep 'unleased Treehouse registration' "$dir/stderr" 'safety recovery did not explain the lease refusal'
+    else
+      [ "$rc" -eq 0 ] || fail "unchanged safety recovery failed: $(cat "$dir/stderr")"
+      assert_absent "$lock" 'unchanged safety recovery retained the stale lock'
+      assert_absent "$dir/home/state/identity-task.meta" 'successful safety recovery retained the task record'
+      assert_equals 1 "$(wc -l < "$dir/treehouse.log" | tr -d ' ')" 'unchanged safety recovery did not return the slot once'
+    fi
+  done
+  pass 'safety recovery preserves a slot lock leased during its wait and clears an unchanged stale lock'
+}
+
 test_installed_treehouse_registered_return() {
   fm_live_gate default-on FM_TREEHOUSE_IDENTITY_REAL treehouse || return 0
   local dir="$TMP_ROOT/installed" binary source state registered physical head
@@ -536,6 +674,7 @@ test_custody_refusals_precede_effects
 test_registration_refusal_preserves_live_process
 test_git_identity_refusals_precede_effects
 test_exact_registered_path_retains_legacy_success
+test_exact_registered_path_refuses_malformed_legacy_claims
 test_symlink_record_requires_claim_for_physical_registration
 test_native_state_fields_are_decodable
 test_return_refuses_lease_created_after_preflight
@@ -543,4 +682,6 @@ test_dirty_and_unlanded_work_remains
 test_reassignment_precedes_identity_resolution
 test_return_retry_rechecks_original_record_custody
 test_legacy_return_retry_refuses_changed_custody_or_registration
+test_stale_lock_final_retry_rechecks_original_record_custody
+test_safety_recovery_rechecks_lease_before_stale_lock_removal
 test_installed_treehouse_registered_return
