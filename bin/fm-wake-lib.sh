@@ -1716,6 +1716,10 @@ fm_treehouse_slot_owner_claim() {  # <worktree> <task-id> <home> [spawn-gen]
 }
 
 # Read the claim on a pool slot and compare it with a task id.
+# A claim requires exactly one task= line and one nonempty home= line.
+# The optional spawn_gen= and required task= values use task-ID token syntax.
+# Duplicate, unknown or malformed fields are unsafe, including empty tokens.
+# Claims without spawn_gen remain compatible.
 # Sets FM_TREEHOUSE_SLOT_OWNER to one of:
 #   mine   - the claim names this task
 #   other  - the claim names a different task, so the slot was reassigned

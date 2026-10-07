@@ -12,8 +12,7 @@
 #   3. The progress note is required where the replacement needs it, lands in
 #      the instructions the replacement reads, and never rewrites a charter.
 #   4. A refusal before the agent is stopped changes nothing.
-#   5. A launch failure after the agent is stopped keeps the prior record,
-#      reports the concrete state, and preserves the work.
+#   5. Launch failures cover the rollback contract in docs/agent-control.md.
 #   6. fm-spawn --relaunch refuses on its own: a live agent, a contradicting
 #      flag, an extra positional, or a backend that cannot prove the previous
 #      agent exited.
@@ -1508,8 +1507,8 @@ test_prepublication_failure_keeps_concurrent_durable_metadata() {
     run_control "$dir" rl30 relaunch --harness codex --note "preserve concurrent metadata" \
       > "$dir/control.out" &
   control_pid=$!
-  # Startup includes the project custody lock before this checkpoint; give the
-  # loaded subprocesses headroom while keeping the fixture wait bounded.
+  # Allow loaded subprocesses time to reach the checkpoint while keeping the
+  # fixture wait bounded.
   while [ ! -e "$dir/cwd-race-ready" ] && [ "$i" -lt 2000 ]; do
     /bin/sleep 0.01
     i=$((i + 1))

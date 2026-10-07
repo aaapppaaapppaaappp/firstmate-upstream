@@ -125,7 +125,7 @@
 # unconditionally, so there is no line an operator could clear to get past it.
 # A claim that cannot be read proves nothing either way and refuses; inspect or
 # repair the claim file at the printed path and re-run - never remove it, since
-# an absent claim proceeds and would return a slot that may be another task's. An
+# an absent claim can permit an exact-path return of another task's slot. An
 # absent claim - a slot taken before claims existed, or already returned - keeps
 # the record-scan protection only when the recorded and registered spellings
 # match exactly. Any other recorded spelling, including a symlink to a physically
@@ -135,7 +135,7 @@
 # once successor evidence has disappeared. A claim that records spawn_gen also
 # requires the owning home and matching metadata incarnation, even on an exact
 # registered path. bin/fm-wake-lib.sh owns registration resolution and claim
-# parsing, including empty, malformed or duplicate generation refusals.
+# parsing.
 # After the reassignment decision and before task-slot cleanup effects, teardown
 # resolves the unique unleased registration and uses its exact spelling for
 # return. It rechecks registration, lease and custody against the original task
