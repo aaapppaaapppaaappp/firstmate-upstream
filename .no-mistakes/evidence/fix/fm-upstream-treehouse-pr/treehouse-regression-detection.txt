@@ -1,0 +1,24 @@
+Behavioral regression checks against executable files from commit 0571131 in a disposable repository-local copy.
+Each expected failure below demonstrates the pre-review defect; corresponding current-code scenarios pass.
+
+Pre-review executable behavior check: r1-final-retry
+not ok - final retry accepted custody lost during the safety callback
+
+Observed the expected behavioral failure. The matching current-code scenario passed in tests/fm-treehouse-identity.test.sh.
+Pre-review executable behavior check: r1-safety-recovery
+not ok - safety recovery removed or changed the newly leased slot lock
+
+Observed the expected behavioral failure. The matching current-code scenario passed in tests/fm-treehouse-identity.test.sh.
+Pre-review executable behavior check: r2-empty-home
+not ok - empty-home: teardown unexpectedly succeeded
+
+Observed the expected behavioral failure. The matching current-code scenario passed in tests/fm-treehouse-identity.test.sh.
+Pre-review executable behavior check: r2-missing-home
+not ok - missing-home: teardown unexpectedly succeeded
+
+Observed the expected behavioral failure. The matching current-code scenario passed in tests/fm-treehouse-identity.test.sh.
+Pre-review executable behavior check: r2-invalid-task
+not ok - invalid-task: teardown unexpectedly succeeded
+
+Observed the expected behavioral failure. The matching current-code scenario passed in tests/fm-treehouse-identity.test.sh.
+All five regression arrangements detect the approved pre-review defects.
